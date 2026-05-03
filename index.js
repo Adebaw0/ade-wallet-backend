@@ -18,22 +18,20 @@ app.use(bodyParser.json());
 /* ================= SESSION STORE ================= */
 const sessions = {};
 
-/* ================= ROOT CHECK ================= */
+/* ================= ROOT ================= */
 app.get("/", (req, res) => {
   res.json({ status: "Wallet API is running 🚀" });
 });
 
-/* ================= DEBUG USERS (YOU ASKED FOR THIS) ================= */
+/* ================= DEBUG USERS ================= */
 app.get("/debug-users", (req, res) => {
   db.all("SELECT * FROM users", [], (err, rows) => {
-    if (err) {
-      return res.json({ error: "DB error" });
-    }
+    if (err) return res.json({ error: "DB error" });
     res.json(rows);
   });
 });
 
-/* ================= DATABASE TABLES ================= */
+/* ================= DATABASE ================= */
 
 db.run(`
 CREATE TABLE IF NOT EXISTS users (
@@ -143,6 +141,29 @@ app.get("/balance/:walletId", (req, res) => {
   );
 });
 
+/* ================= FUND WALLET ================= */
+app.post("/fund", (req, res) => {
+  const { wallet_id, amount } = req.body;
+
+  const amt = parseFloat(amount);
+
+  if (!amt || amt <= 0) {
+    return res.json({ error: "Invalid amount" });
+  }
+
+  db.run(
+    "UPDATE wallets SET balance = balance + ? WHERE id = ?",
+    [amt, wallet_id],
+    function (err) {
+      if (err) {
+        return res.json({ error: "Funding failed" });
+      }
+
+      res.json({ message: "Wallet funded successfully" });
+    }
+  );
+});
+
 /* ================= TRANSFER ================= */
 app.post("/transfer", (req, res) => {
   const token = req.headers.authorization?.split(" ")[1];
@@ -151,11 +172,10 @@ app.post("/transfer", (req, res) => {
     return res.json({ error: "Unauthorized" });
   }
 
-  const from_wallet = req.body.from_wallet;
-  const to_wallet = req.body.to_wallet;
-  const amount = parseFloat(req.body.amount);
+  const { from_wallet, to_wallet, amount } = req.body;
+  const amt = parseFloat(amount);
 
-  if (!amount || amount <= 0) {
+  if (!amt || amt <= 0) {
     return res.json({ error: "Invalid amount" });
   }
 
@@ -167,7 +187,7 @@ app.post("/transfer", (req, res) => {
         return res.json({ error: "Sender not found" });
       }
 
-      if (sender.balance < amount) {
+      if (sender.balance < amt) {
         return res.json({ error: "Insufficient balance" });
       }
 
@@ -181,17 +201,17 @@ app.post("/transfer", (req, res) => {
 
           db.run(
             "UPDATE wallets SET balance = balance - ? WHERE id = ?",
-            [amount, from_wallet]
+            [amt, from_wallet]
           );
 
           db.run(
             "UPDATE wallets SET balance = balance + ? WHERE id = ?",
-            [amount, to_wallet]
+            [amt, to_wallet]
           );
 
           db.run(
             "INSERT INTO transactions (wallet_id, type, amount) VALUES (?, ?, ?)",
-            [from_wallet, "transfer", amount]
+            [from_wallet, "transfer", amt]
           );
 
           res.json({ message: "Transfer successful" });
