@@ -15,7 +15,7 @@ app.use(cors({
 
 app.use(bodyParser.json());
 
-/* ================= SIMPLE SESSION STORE ================= */
+/* ================= SESSION STORE ================= */
 const sessions = {};
 
 /* ================= HEALTH CHECK ================= */
@@ -23,7 +23,7 @@ app.get("/", (req, res) => {
   res.json({ status: "Wallet API is running 🚀" });
 });
 
-/* ================= DATABASE TABLES ================= */
+/* ================= DATABASE ================= */
 
 db.run(`
 CREATE TABLE IF NOT EXISTS users (
@@ -53,13 +53,16 @@ CREATE TABLE IF NOT EXISTS transactions (
 
 /* ================= REGISTER ================= */
 app.post("/register", (req, res) => {
-  const { phone, password } = req.body;
+  const phone = req.body.phone?.trim();
+  const password = req.body.password?.trim();
 
   db.run(
     "INSERT INTO users (phone, password) VALUES (?, ?)",
     [phone, password],
     function (err) {
-      if (err) return res.json({ error: "User already exists" });
+      if (err) {
+        return res.json({ error: "User already exists" });
+      }
 
       db.run(
         "INSERT INTO wallets (user_id, balance) VALUES (?, ?)",
@@ -71,9 +74,10 @@ app.post("/register", (req, res) => {
   );
 });
 
-/* ================= LOGIN ================= */
+/* ================= LOGIN (FIXED) ================= */
 app.post("/login", (req, res) => {
-  const { phone, password } = req.body;
+  const phone = req.body.phone?.trim();
+  const password = req.body.password?.trim();
 
   db.get(
     "SELECT * FROM users WHERE phone = ? AND password = ?",
@@ -137,11 +141,11 @@ app.post("/transfer", (req, res) => {
     return res.json({ error: "Unauthorized" });
   }
 
-  const { from_wallet, to_wallet, amount } = req.body;
+  const from_wallet = req.body.from_wallet;
+  const to_wallet = req.body.to_wallet;
+  const amount = parseFloat(req.body.amount);
 
-  const amt = parseFloat(amount);
-
-  if (amt <= 0) {
+  if (!amount || amount <= 0) {
     return res.json({ error: "Invalid amount" });
   }
 
@@ -153,7 +157,7 @@ app.post("/transfer", (req, res) => {
         return res.json({ error: "Sender not found" });
       }
 
-      if (sender.balance < amt) {
+      if (sender.balance < amount) {
         return res.json({ error: "Insufficient balance" });
       }
 
@@ -167,17 +171,17 @@ app.post("/transfer", (req, res) => {
 
           db.run(
             "UPDATE wallets SET balance = balance - ? WHERE id = ?",
-            [amt, from_wallet]
+            [amount, from_wallet]
           );
 
           db.run(
             "UPDATE wallets SET balance = balance + ? WHERE id = ?",
-            [amt, to_wallet]
+            [amount, to_wallet]
           );
 
           db.run(
             "INSERT INTO transactions (wallet_id, type, amount) VALUES (?, ?, ?)",
-            [from_wallet, "transfer", amt]
+            [from_wallet, "transfer", amount]
           );
 
           res.json({ message: "Transfer successful" });
