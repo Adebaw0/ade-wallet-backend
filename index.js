@@ -105,7 +105,7 @@ app.post("/wallet", auth, async (req, res) => {
 });
 
 // =======================
-// CREDIT WALLET
+// CREDIT (FIXED)
 // =======================
 app.post("/credit", auth, async (req, res) => {
   try {
@@ -119,6 +119,7 @@ app.post("/credit", auth, async (req, res) => {
     if (updated.rows.length === 0)
       return res.status(404).json({ error: "Wallet not found" });
 
+    // ✅ FIXED TRANSACTION LOGGING
     await db.query(
       "INSERT INTO transactions (wallet_id,type,amount,description) VALUES ($1,'credit',$2,'Wallet funded')",
       [wallet_id, amount]
@@ -166,11 +167,13 @@ app.post("/transfer", auth, async (req, res) => {
       [amount, to_wallet]
     );
 
+    // debit log
     await db.query(
       "INSERT INTO transactions (wallet_id,type,amount,description) VALUES ($1,'debit',$2,'Transfer sent')",
       [from_wallet, amount]
     );
 
+    // credit log
     await db.query(
       "INSERT INTO transactions (wallet_id,type,amount,description) VALUES ($1,'credit',$2,'Transfer received')",
       [to_wallet, amount]
@@ -202,7 +205,7 @@ app.get("/balance/:wallet_id", auth, async (req, res) => {
 });
 
 // =======================
-// TRANSACTION HISTORY
+// TRANSACTIONS
 // =======================
 app.get("/transactions/:wallet_id", auth, async (req, res) => {
   try {
