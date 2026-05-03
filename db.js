@@ -1,10 +1,6 @@
-const { Pool } = require("pg");
+const sqlite3 = require("sqlite3").verbose();
+const path = require("path");
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false }
-});
+const db = new sqlite3.Database(path.join(__dirname, "wallet.db"));
 
-module.exports = {
-  query: (text, params) => pool.query(text, params)
-};
+module.exports = db;
