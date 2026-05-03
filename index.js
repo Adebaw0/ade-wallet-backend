@@ -15,10 +15,10 @@ app.use(cors({
 
 app.use(bodyParser.json());
 
-/* ================= SIMPLE TOKEN STORE ================= */
+/* ================= SIMPLE SESSION STORE ================= */
 const sessions = {};
 
-/* ================= ROOT TEST ================= */
+/* ================= ROOT ================= */
 app.get("/", (req, res) => {
   res.json({ status: "Wallet API is running 🚀" });
 });
@@ -51,7 +51,7 @@ CREATE TABLE IF NOT EXISTS transactions (
 )
 `);
 
-/* ================= REGISTER (optional but useful) ================= */
+/* ================= REGISTER ================= */
 app.post("/register", (req, res) => {
   const { phone, password } = req.body;
 
@@ -59,7 +59,9 @@ app.post("/register", (req, res) => {
     "INSERT INTO users (phone, password) VALUES (?, ?)",
     [phone, password],
     function (err) {
-      if (err) return res.json({ error: "User already exists" });
+      if (err) {
+        return res.json({ error: "User already exists" });
+      }
 
       db.run(
         "INSERT INTO wallets (user_id, balance) VALUES (?, ?)",
@@ -111,9 +113,8 @@ app.post("/login", (req, res) => {
 /* ================= BALANCE ================= */
 app.get("/balance/:walletId", (req, res) => {
   const token = req.headers.authorization?.split(" ")[1];
-  const session = sessions[token];
 
-  if (!session) {
+  if (!sessions[token]) {
     return res.json({ error: "Unauthorized" });
   }
 
@@ -133,9 +134,8 @@ app.get("/balance/:walletId", (req, res) => {
 /* ================= TRANSFER ================= */
 app.post("/transfer", (req, res) => {
   const token = req.headers.authorization?.split(" ")[1];
-  const session = sessions[token];
 
-  if (!session) {
+  if (!sessions[token]) {
     return res.json({ error: "Unauthorized" });
   }
 
@@ -152,7 +152,7 @@ app.post("/transfer", (req, res) => {
     [from_wallet],
     (err, sender) => {
       if (err || !sender) {
-        return res.json({ error: "Sender wallet not found" });
+        return res.json({ error: "Sender not found" });
       }
 
       if (sender.balance < amt) {
@@ -167,19 +167,16 @@ app.post("/transfer", (req, res) => {
             return res.json({ error: "Receiver not found" });
           }
 
-          // deduct sender
           db.run(
             "UPDATE wallets SET balance = balance - ? WHERE id = ?",
             [amt, from_wallet]
           );
 
-          // add receiver
           db.run(
             "UPDATE wallets SET balance = balance + ? WHERE id = ?",
             [amt, to_wallet]
           );
 
-          // log transaction
           db.run(
             "INSERT INTO transactions (wallet_id, type, amount) VALUES (?, ?, ?)",
             [from_wallet, "transfer", amt]
