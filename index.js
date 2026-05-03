@@ -1,15 +1,14 @@
 const express = require("express");
 const cors = require("cors");
 const bodyParser = require("body-parser");
-const db = require("./db"); // your existing db.js
+const db = require("./db");
 
 const app = express();
 app.use(cors());
 app.use(bodyParser.json());
 
-// ================= CREATE TABLES =================
+// ================= TABLES =================
 
-// USERS
 db.run(`
 CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -18,7 +17,6 @@ CREATE TABLE IF NOT EXISTS users (
 )
 `);
 
-// WALLETS
 db.run(`
 CREATE TABLE IF NOT EXISTS wallets (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -27,7 +25,6 @@ CREATE TABLE IF NOT EXISTS wallets (
 )
 `);
 
-// TRANSACTIONS (IMPORTANT FIX)
 db.run(`
 CREATE TABLE IF NOT EXISTS transactions (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -74,10 +71,9 @@ app.get("/balance/:walletId", (req, res) => {
   );
 });
 
-// ================= TRANSFER (WITH HISTORY FIX) =================
+// ================= TRANSFER =================
 app.post("/transfer", (req, res) => {
   const { from_wallet, to_wallet, amount } = req.body;
-
   const amt = Number(amount);
 
   db.get(
@@ -99,7 +95,7 @@ app.post("/transfer", (req, res) => {
         [amt, to_wallet]
       );
 
-      // ================= SAVE TRANSACTIONS =================
+      // ================= SAVE HISTORY (FIXED) =================
 
       db.run(
         "INSERT INTO transactions (wallet_id, type, amount, description) VALUES (?, ?, ?, ?)",
@@ -135,5 +131,5 @@ app.get("/transactions/:walletId", (req, res) => {
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-  console.log("Server running on port", PORT);
+  console.log("Wallet backend running on port", PORT);
 });
