@@ -1,233 +1,139 @@
 const express = require("express");
-const db = require("./db");
-const bcrypt = require("bcryptjs");
-const jwt = require("jsonwebtoken");
+const cors = require("cors");
+const bodyParser = require("body-parser");
+const db = require("./db"); // your existing db.js
 
 const app = express();
-app.use(express.json());
+app.use(cors());
+app.use(bodyParser.json());
 
-const SECRET = process.env.JWT_SECRET || "secretkey";
+// ================= CREATE TABLES =================
 
-// =======================
-// HOME
-// =======================
-app.get("/", (req, res) => {
-  res.send("Fintech API running 🚀");
+// USERS
+db.run(`
+CREATE TABLE IF NOT EXISTS users (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  phone TEXT,
+  password TEXT
+)
+`);
+
+// WALLETS
+db.run(`
+CREATE TABLE IF NOT EXISTS wallets (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER,
+  balance REAL DEFAULT 0
+)
+`);
+
+// TRANSACTIONS (IMPORTANT FIX)
+db.run(`
+CREATE TABLE IF NOT EXISTS transactions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  wallet_id INTEGER,
+  type TEXT,
+  amount REAL,
+  description TEXT,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+)
+`);
+
+// ================= LOGIN =================
+app.post("/login", (req, res) => {
+  const { phone, password } = req.body;
+
+  db.get(
+    "SELECT * FROM users WHERE phone = ? AND password = ?",
+    [phone, password],
+    (err, user) => {
+      if (err || !user) {
+        return res.json({ error: "Invalid login" });
+      }
+
+      res.json({
+        token: "token-" + user.id,
+        user_id: user.id
+      });
+    }
+  );
 });
 
-// =======================
-// REGISTER
-// =======================
-app.post("/register", async (req, res) => {
-  try {
-    const { name, phone, password } = req.body;
+// ================= BALANCE =================
+app.get("/balance/:walletId", (req, res) => {
+  db.get(
+    "SELECT * FROM wallets WHERE id = ?",
+    [req.params.walletId],
+    (err, wallet) => {
+      if (err || !wallet) {
+        return res.json({ balance: 0 });
+      }
 
-    const hashed = await bcrypt.hash(password, 10);
-
-    const user = await db.query(
-      "INSERT INTO users (name, phone, password) VALUES ($1,$2,$3) RETURNING id,name,phone",
-      [name, phone, hashed]
-    );
-
-    res.json(user.rows[0]);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+      res.json({ balance: wallet.balance });
+    }
+  );
 });
 
-// =======================
-// LOGIN
-// =======================
-app.post("/login", async (req, res) => {
-  try {
-    const { phone, password } = req.body;
+// ================= TRANSFER (WITH HISTORY FIX) =================
+app.post("/transfer", (req, res) => {
+  const { from_wallet, to_wallet, amount } = req.body;
 
-    const user = await db.query(
-      "SELECT * FROM users WHERE phone=$1",
-      [phone]
-    );
+  const amt = Number(amount);
 
-    if (user.rows.length === 0)
-      return res.status(400).json({ error: "User not found" });
+  db.get(
+    "SELECT * FROM wallets WHERE id = ?",
+    [from_wallet],
+    (err, sender) => {
+      if (!sender || sender.balance < amt) {
+        return res.json({ error: "Insufficient balance" });
+      }
 
-    const valid = await bcrypt.compare(password, user.rows[0].password);
+      // update balances
+      db.run(
+        "UPDATE wallets SET balance = balance - ? WHERE id = ?",
+        [amt, from_wallet]
+      );
 
-    if (!valid)
-      return res.status(400).json({ error: "Wrong password" });
+      db.run(
+        "UPDATE wallets SET balance = balance + ? WHERE id = ?",
+        [amt, to_wallet]
+      );
 
-    const token = jwt.sign(
-      { id: user.rows[0].id },
-      SECRET,
-      { expiresIn: "1d" }
-    );
+      // ================= SAVE TRANSACTIONS =================
 
-    res.json({ token });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+      db.run(
+        "INSERT INTO transactions (wallet_id, type, amount, description) VALUES (?, ?, ?, ?)",
+        [from_wallet, "debit", amt, `Sent to wallet ${to_wallet}`]
+      );
+
+      db.run(
+        "INSERT INTO transactions (wallet_id, type, amount, description) VALUES (?, ?, ?, ?)",
+        [to_wallet, "credit", amt, `Received from wallet ${from_wallet}`]
+      );
+
+      res.json({ message: "Transfer successful" });
+    }
+  );
 });
 
-// =======================
-// AUTH MIDDLEWARE
-// =======================
-function auth(req, res, next) {
-  try {
-    const header = req.headers.authorization;
+// ================= TRANSACTIONS =================
+app.get("/transactions/:walletId", (req, res) => {
+  db.all(
+    "SELECT * FROM transactions WHERE wallet_id = ? ORDER BY created_at DESC",
+    [req.params.walletId],
+    (err, rows) => {
+      if (err) {
+        return res.json({ transactions: [] });
+      }
 
-    if (!header)
-      return res.status(401).json({ error: "No token" });
-
-    const token = header.split(" ")[1];
-
-    const decoded = jwt.verify(token, SECRET);
-    req.user = decoded;
-
-    next();
-  } catch {
-    res.status(401).json({ error: "Invalid token" });
-  }
-}
-
-// =======================
-// WALLET
-// =======================
-app.post("/wallet", auth, async (req, res) => {
-  try {
-    const wallet = await db.query(
-      "INSERT INTO wallets (user_id, balance, currency) VALUES ($1,0,'NGN') RETURNING *",
-      [req.user.id]
-    );
-
-    res.json(wallet.rows[0]);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+      res.json({ transactions: rows });
+    }
+  );
 });
 
-// =======================
-// CREDIT (FIXED)
-// =======================
-app.post("/credit", auth, async (req, res) => {
-  try {
-    const { wallet_id, amount } = req.body;
-
-    const updated = await db.query(
-      "UPDATE wallets SET balance = balance + $1 WHERE id=$2 RETURNING *",
-      [amount, wallet_id]
-    );
-
-    if (updated.rows.length === 0)
-      return res.status(404).json({ error: "Wallet not found" });
-
-    // ✅ FIXED TRANSACTION LOGGING
-    await db.query(
-      "INSERT INTO transactions (wallet_id,type,amount,description) VALUES ($1,'credit',$2,'Wallet funded')",
-      [wallet_id, amount]
-    );
-
-    res.json(updated.rows[0]);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// =======================
-// TRANSFER
-// =======================
-app.post("/transfer", auth, async (req, res) => {
-  try {
-    const { from_wallet, to_wallet, amount } = req.body;
-
-    const sender = await db.query(
-      "SELECT * FROM wallets WHERE id=$1",
-      [from_wallet]
-    );
-
-    if (sender.rows.length === 0)
-      return res.status(404).json({ error: "Sender not found" });
-
-    if (Number(sender.rows[0].balance) < Number(amount))
-      return res.status(400).json({ error: "Insufficient balance" });
-
-    const receiver = await db.query(
-      "SELECT * FROM wallets WHERE id=$1",
-      [to_wallet]
-    );
-
-    if (receiver.rows.length === 0)
-      return res.status(404).json({ error: "Receiver not found" });
-
-    await db.query(
-      "UPDATE wallets SET balance = balance - $1 WHERE id=$2",
-      [amount, from_wallet]
-    );
-
-    await db.query(
-      "UPDATE wallets SET balance = balance + $1 WHERE id=$2",
-      [amount, to_wallet]
-    );
-
-    // debit log
-    await db.query(
-      "INSERT INTO transactions (wallet_id,type,amount,description) VALUES ($1,'debit',$2,'Transfer sent')",
-      [from_wallet, amount]
-    );
-
-    // credit log
-    await db.query(
-      "INSERT INTO transactions (wallet_id,type,amount,description) VALUES ($1,'credit',$2,'Transfer received')",
-      [to_wallet, amount]
-    );
-
-    res.json({ message: "Transfer successful" });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// =======================
-// BALANCE
-// =======================
-app.get("/balance/:wallet_id", auth, async (req, res) => {
-  try {
-    const result = await db.query(
-      "SELECT id,user_id,balance,currency FROM wallets WHERE id=$1",
-      [req.params.wallet_id]
-    );
-
-    if (result.rows.length === 0)
-      return res.status(404).json({ error: "Wallet not found" });
-
-    res.json(result.rows[0]);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// =======================
-// TRANSACTIONS
-// =======================
-app.get("/transactions/:wallet_id", auth, async (req, res) => {
-  try {
-    const result = await db.query(
-      "SELECT * FROM transactions WHERE wallet_id=$1 ORDER BY created_at DESC",
-      [req.params.wallet_id]
-    );
-
-    res.json({
-      count: result.rows.length,
-      transactions: result.rows
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// =======================
-// SERVER
-// =======================
-const PORT = process.env.PORT || 8080;
+// ================= SERVER =================
+const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-  console.log("Server running on port " + PORT);
+  console.log("Server running on port", PORT);
 });
