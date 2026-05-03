@@ -4,14 +4,46 @@ const crypto = require("crypto");
 const db = require("./db");
 
 const app = express();
-
 app.use(cors());
 app.use(express.json());
 
-/* ================= MEMORY SESSION ================= */
+/* ================= SESSION STORE ================= */
 const sessions = {};
 
-/* ================= HEALTH CHECK ================= */
+/* ================= CREATE TABLES AUTO ================= */
+const initDB = async () => {
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS users (
+      id SERIAL PRIMARY KEY,
+      phone TEXT UNIQUE,
+      password TEXT
+    )
+  `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS wallets (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER,
+      balance NUMERIC DEFAULT 0
+    )
+  `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS transactions (
+      id SERIAL PRIMARY KEY,
+      wallet_id INTEGER,
+      type TEXT,
+      amount NUMERIC,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  console.log("Database ready ✅");
+};
+
+initDB();
+
+/* ================= ROOT ================= */
 app.get("/", (req, res) => {
   res.json({ status: "Wallet API running 🚀" });
 });
@@ -34,8 +66,10 @@ app.post("/register", async (req, res) => {
     );
 
     res.json({ message: "User created successfully" });
+
   } catch (err) {
-    res.json({ error: "Register failed (maybe user exists)" });
+    console.log("REGISTER ERROR:", err);
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -69,8 +103,10 @@ app.post("/login", async (req, res) => {
       token,
       wallet_id: wallet.rows[0].id
     });
+
   } catch (err) {
-    res.json({ error: "Login failed" });
+    console.log("LOGIN ERROR:", err);
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -89,8 +125,10 @@ app.get("/balance/:walletId", async (req, res) => {
     );
 
     res.json({ balance: result.rows[0].balance });
+
   } catch (err) {
-    res.json({ error: "Balance error" });
+    console.log("BALANCE ERROR:", err);
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -105,8 +143,10 @@ app.post("/fund", async (req, res) => {
     );
 
     res.json({ message: "Wallet funded successfully" });
+
   } catch (err) {
-    res.json({ error: "Funding failed" });
+    console.log("FUND ERROR:", err);
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -141,8 +181,10 @@ app.post("/transfer", async (req, res) => {
     );
 
     res.json({ message: "Transfer successful" });
+
   } catch (err) {
-    res.json({ error: "Transfer failed" });
+    console.log("TRANSFER ERROR:", err);
+    res.status(500).json({ error: err.message });
   }
 });
 
