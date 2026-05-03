@@ -18,12 +18,22 @@ app.use(bodyParser.json());
 /* ================= SESSION STORE ================= */
 const sessions = {};
 
-/* ================= HEALTH CHECK ================= */
+/* ================= ROOT CHECK ================= */
 app.get("/", (req, res) => {
   res.json({ status: "Wallet API is running 🚀" });
 });
 
-/* ================= DATABASE ================= */
+/* ================= DEBUG USERS (YOU ASKED FOR THIS) ================= */
+app.get("/debug-users", (req, res) => {
+  db.all("SELECT * FROM users", [], (err, rows) => {
+    if (err) {
+      return res.json({ error: "DB error" });
+    }
+    res.json(rows);
+  });
+});
+
+/* ================= DATABASE TABLES ================= */
 
 db.run(`
 CREATE TABLE IF NOT EXISTS users (
@@ -74,7 +84,7 @@ app.post("/register", (req, res) => {
   );
 });
 
-/* ================= LOGIN (FIXED) ================= */
+/* ================= LOGIN ================= */
 app.post("/login", (req, res) => {
   const phone = req.body.phone?.trim();
   const password = req.body.password?.trim();
