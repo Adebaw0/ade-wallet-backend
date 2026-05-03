@@ -1,23 +1,34 @@
 const express = require("express");
 const cors = require("cors");
 const bodyParser = require("body-parser");
+const crypto = require("crypto");
 const db = require("./db");
 
 const app = express();
-app.use(cors());
+
+/* ================= MIDDLEWARE ================= */
+app.use(cors({
+  origin: "*",
+  methods: ["GET", "POST", "PUT", "DELETE"],
+  allowedHeaders: ["Content-Type", "Authorization"]
+}));
+
 app.use(bodyParser.json());
 
-/* ================= ROOT (FIX FOR RENDER + EXPO TEST) ================= */
+/* ================= SIMPLE TOKEN STORE ================= */
+const sessions = {};
+
+/* ================= ROOT TEST ================= */
 app.get("/", (req, res) => {
   res.json({ status: "Wallet API is running 🚀" });
 });
 
-/* ================= TABLES ================= */
+/* ================= DATABASE TABLES ================= */
 
 db.run(`
 CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  phone TEXT,
+  phone TEXT UNIQUE,
   password TEXT
 )
 `);
@@ -36,10 +47,29 @@ CREATE TABLE IF NOT EXISTS transactions (
   wallet_id INTEGER,
   type TEXT,
   amount REAL,
-  description TEXT,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 )
 `);
+
+/* ================= REGISTER (optional but useful) ================= */
+app.post("/register", (req, res) => {
+  const { phone, password } = req.body;
+
+  db.run(
+    "INSERT INTO users (phone, password) VALUES (?, ?)",
+    [phone, password],
+    function (err) {
+      if (err) return res.json({ error: "User already exists" });
+
+      db.run(
+        "INSERT INTO wallets (user_id, balance) VALUES (?, ?)",
+        [this.lastID, 0]
+      );
+
+      res.json({ message: "User created successfully" });
+    }
+  );
+});
 
 /* ================= LOGIN ================= */
 app.post("/login", (req, res) => {
@@ -50,25 +80,49 @@ app.post("/login", (req, res) => {
     [phone, password],
     (err, user) => {
       if (err || !user) {
-        return res.json({ error: "Invalid login" });
+        return res.json({ error: "Invalid credentials" });
       }
 
-      res.json({
-        token: "token-" + user.id,
-        user_id: user.id
-      });
+      db.get(
+        "SELECT * FROM wallets WHERE user_id = ?",
+        [user.id],
+        (err2, wallet) => {
+          if (err2 || !wallet) {
+            return res.json({ error: "Wallet not found" });
+          }
+
+          const token = crypto.randomBytes(16).toString("hex");
+
+          sessions[token] = {
+            userId: user.id,
+            walletId: wallet.id
+          };
+
+          res.json({
+            token,
+            wallet_id: wallet.id
+          });
+        }
+      );
     }
   );
 });
 
 /* ================= BALANCE ================= */
 app.get("/balance/:walletId", (req, res) => {
+  const token = req.headers.authorization?.split(" ")[1];
+  const session = sessions[token];
+
+  if (!session) {
+    return res.json({ error: "Unauthorized" });
+  }
+
   db.get(
-    "SELECT * FROM wallets WHERE id = ?",
+    "SELECT balance FROM wallets WHERE id = ?",
     [req.params.walletId],
     (err, wallet) => {
       if (err || !wallet) {
-        return res.json({ balance: 0 });
+        return res.json({ error: "Wallet not found" });
       }
 
       res.json({ balance: wallet.balance });
@@ -78,64 +132,69 @@ app.get("/balance/:walletId", (req, res) => {
 
 /* ================= TRANSFER ================= */
 app.post("/transfer", (req, res) => {
+  const token = req.headers.authorization?.split(" ")[1];
+  const session = sessions[token];
+
+  if (!session) {
+    return res.json({ error: "Unauthorized" });
+  }
+
   const { from_wallet, to_wallet, amount } = req.body;
-  const amt = Number(amount);
+
+  const amt = parseFloat(amount);
+
+  if (amt <= 0) {
+    return res.json({ error: "Invalid amount" });
+  }
 
   db.get(
-    "SELECT * FROM wallets WHERE id = ?",
+    "SELECT balance FROM wallets WHERE id = ?",
     [from_wallet],
     (err, sender) => {
-      if (!sender || sender.balance < amt) {
+      if (err || !sender) {
+        return res.json({ error: "Sender wallet not found" });
+      }
+
+      if (sender.balance < amt) {
         return res.json({ error: "Insufficient balance" });
       }
 
-      // deduct sender
-      db.run(
-        "UPDATE wallets SET balance = balance - ? WHERE id = ?",
-        [amt, from_wallet]
+      db.get(
+        "SELECT balance FROM wallets WHERE id = ?",
+        [to_wallet],
+        (err2, receiver) => {
+          if (err2 || !receiver) {
+            return res.json({ error: "Receiver not found" });
+          }
+
+          // deduct sender
+          db.run(
+            "UPDATE wallets SET balance = balance - ? WHERE id = ?",
+            [amt, from_wallet]
+          );
+
+          // add receiver
+          db.run(
+            "UPDATE wallets SET balance = balance + ? WHERE id = ?",
+            [amt, to_wallet]
+          );
+
+          // log transaction
+          db.run(
+            "INSERT INTO transactions (wallet_id, type, amount) VALUES (?, ?, ?)",
+            [from_wallet, "transfer", amt]
+          );
+
+          res.json({ message: "Transfer successful" });
+        }
       );
-
-      // add receiver
-      db.run(
-        "UPDATE wallets SET balance = balance + ? WHERE id = ?",
-        [amt, to_wallet]
-      );
-
-      // ================= SAVE TRANSACTIONS (FIXED) =================
-
-      db.run(
-        "INSERT INTO transactions (wallet_id, type, amount, description) VALUES (?, ?, ?, ?)",
-        [from_wallet, "debit", amt, `Sent to wallet ${to_wallet}`]
-      );
-
-      db.run(
-        "INSERT INTO transactions (wallet_id, type, amount, description) VALUES (?, ?, ?, ?)",
-        [to_wallet, "credit", amt, `Received from wallet ${from_wallet}`]
-      );
-
-      res.json({ message: "Transfer successful" });
     }
   );
 });
 
-/* ================= TRANSACTIONS ================= */
-app.get("/transactions/:walletId", (req, res) => {
-  db.all(
-    "SELECT * FROM transactions WHERE wallet_id = ? ORDER BY created_at DESC",
-    [req.params.walletId],
-    (err, rows) => {
-      if (err) {
-        return res.json({ transactions: [] });
-      }
-
-      res.json({ transactions: rows || [] });
-    }
-  );
-});
-
-/* ================= SERVER ================= */
+/* ================= START SERVER ================= */
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-  console.log("Wallet backend running on port", PORT);
+  console.log(`Server running on port ${PORT}`);
 });
