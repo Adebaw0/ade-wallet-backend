@@ -4,48 +4,30 @@ const crypto = require("crypto");
 const db = require("./db");
 
 const app = express();
+
 app.use(cors());
 app.use(express.json());
 
-/* ================= SESSION STORE ================= */
+/* ================= SESSIONS ================= */
 const sessions = {};
 
-/* ================= CREATE TABLES AUTO ================= */
-const initDB = async () => {
-  await db.query(`
-    CREATE TABLE IF NOT EXISTS users (
-      id SERIAL PRIMARY KEY,
-      phone TEXT UNIQUE,
-      password TEXT
-    )
-  `);
-
-  await db.query(`
-    CREATE TABLE IF NOT EXISTS wallets (
-      id SERIAL PRIMARY KEY,
-      user_id INTEGER,
-      balance NUMERIC DEFAULT 0
-    )
-  `);
-
-  await db.query(`
-    CREATE TABLE IF NOT EXISTS transactions (
-      id SERIAL PRIMARY KEY,
-      wallet_id INTEGER,
-      type TEXT,
-      amount NUMERIC,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-
-  console.log("Database ready ✅");
-};
-
-initDB();
-
-/* ================= ROOT ================= */
+/* ================= HEALTH CHECK ================= */
 app.get("/", (req, res) => {
   res.json({ status: "Wallet API running 🚀" });
+});
+
+/* ================= TEST DB ================= */
+app.get("/test-db", async (req, res) => {
+  try {
+    const result = await db.query("SELECT NOW()");
+    res.json({
+      success: true,
+      time: result.rows[0]
+    });
+  } catch (err) {
+    console.log("DB ERROR:", err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 /* ================= REGISTER ================= */
@@ -132,7 +114,7 @@ app.get("/balance/:walletId", async (req, res) => {
   }
 });
 
-/* ================= FUND ================= */
+/* ================= FUND WALLET ================= */
 app.post("/fund", async (req, res) => {
   try {
     const { wallet_id, amount } = req.body;
@@ -166,7 +148,7 @@ app.post("/transfer", async (req, res) => {
       [from_wallet]
     );
 
-    if (sender.rows[0].balance < amount) {
+    if (!sender.rows.length || sender.rows[0].balance < amount) {
       return res.json({ error: "Insufficient balance" });
     }
 
