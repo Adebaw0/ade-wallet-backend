@@ -1,5 +1,5 @@
 {
-  "name": "ade-wallet-api",
+  "name": "wallet-backend",
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
