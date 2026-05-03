@@ -11,7 +11,7 @@ app.use(express.json());
 /* ================= SESSIONS ================= */
 const sessions = {};
 
-/* ================= HEALTH CHECK ================= */
+/* ================= ROOT ================= */
 app.get("/", (req, res) => {
   res.json({ status: "Wallet API running 🚀" });
 });
@@ -114,7 +114,7 @@ app.get("/balance/:walletId", async (req, res) => {
   }
 });
 
-/* ================= FUND WALLET ================= */
+/* ================= FUND ================= */
 app.post("/fund", async (req, res) => {
   try {
     const { wallet_id, amount } = req.body;
