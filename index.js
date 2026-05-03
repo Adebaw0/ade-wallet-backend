@@ -89,7 +89,7 @@ function auth(req, res, next) {
 }
 
 // =======================
-// CREATE WALLET
+// WALLET
 // =======================
 app.post("/wallet", auth, async (req, res) => {
   try {
@@ -119,6 +119,11 @@ app.post("/credit", auth, async (req, res) => {
     if (updated.rows.length === 0)
       return res.status(404).json({ error: "Wallet not found" });
 
+    await db.query(
+      "INSERT INTO transactions (wallet_id,type,amount,description) VALUES ($1,'credit',$2,'Wallet funded')",
+      [wallet_id, amount]
+    );
+
     res.json(updated.rows[0]);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -132,19 +137,44 @@ app.post("/transfer", auth, async (req, res) => {
   try {
     const { from_wallet, to_wallet, amount } = req.body;
 
-    const sender = await db.query("SELECT * FROM wallets WHERE id=$1", [from_wallet]);
+    const sender = await db.query(
+      "SELECT * FROM wallets WHERE id=$1",
+      [from_wallet]
+    );
+
     if (sender.rows.length === 0)
       return res.status(404).json({ error: "Sender not found" });
 
     if (Number(sender.rows[0].balance) < Number(amount))
       return res.status(400).json({ error: "Insufficient balance" });
 
-    const receiver = await db.query("SELECT * FROM wallets WHERE id=$1", [to_wallet]);
+    const receiver = await db.query(
+      "SELECT * FROM wallets WHERE id=$1",
+      [to_wallet]
+    );
+
     if (receiver.rows.length === 0)
       return res.status(404).json({ error: "Receiver not found" });
 
-    await db.query("UPDATE wallets SET balance = balance - $1 WHERE id=$2", [amount, from_wallet]);
-    await db.query("UPDATE wallets SET balance = balance + $1 WHERE id=$2", [amount, to_wallet]);
+    await db.query(
+      "UPDATE wallets SET balance = balance - $1 WHERE id=$2",
+      [amount, from_wallet]
+    );
+
+    await db.query(
+      "UPDATE wallets SET balance = balance + $1 WHERE id=$2",
+      [amount, to_wallet]
+    );
+
+    await db.query(
+      "INSERT INTO transactions (wallet_id,type,amount,description) VALUES ($1,'debit',$2,'Transfer sent')",
+      [from_wallet, amount]
+    );
+
+    await db.query(
+      "INSERT INTO transactions (wallet_id,type,amount,description) VALUES ($1,'credit',$2,'Transfer received')",
+      [to_wallet, amount]
+    );
 
     res.json({ message: "Transfer successful" });
   } catch (err) {
@@ -166,6 +196,25 @@ app.get("/balance/:wallet_id", auth, async (req, res) => {
       return res.status(404).json({ error: "Wallet not found" });
 
     res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// =======================
+// TRANSACTION HISTORY
+// =======================
+app.get("/transactions/:wallet_id", auth, async (req, res) => {
+  try {
+    const result = await db.query(
+      "SELECT * FROM transactions WHERE wallet_id=$1 ORDER BY created_at DESC",
+      [req.params.wallet_id]
+    );
+
+    res.json({
+      count: result.rows.length,
+      transactions: result.rows
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
