@@ -7,7 +7,12 @@ const app = express();
 app.use(cors());
 app.use(bodyParser.json());
 
-// ================= TABLES =================
+/* ================= ROOT (FIX FOR RENDER + EXPO TEST) ================= */
+app.get("/", (req, res) => {
+  res.json({ status: "Wallet API is running 🚀" });
+});
+
+/* ================= TABLES ================= */
 
 db.run(`
 CREATE TABLE IF NOT EXISTS users (
@@ -36,7 +41,7 @@ CREATE TABLE IF NOT EXISTS transactions (
 )
 `);
 
-// ================= LOGIN =================
+/* ================= LOGIN ================= */
 app.post("/login", (req, res) => {
   const { phone, password } = req.body;
 
@@ -56,7 +61,7 @@ app.post("/login", (req, res) => {
   );
 });
 
-// ================= BALANCE =================
+/* ================= BALANCE ================= */
 app.get("/balance/:walletId", (req, res) => {
   db.get(
     "SELECT * FROM wallets WHERE id = ?",
@@ -71,7 +76,7 @@ app.get("/balance/:walletId", (req, res) => {
   );
 });
 
-// ================= TRANSFER =================
+/* ================= TRANSFER ================= */
 app.post("/transfer", (req, res) => {
   const { from_wallet, to_wallet, amount } = req.body;
   const amt = Number(amount);
@@ -84,18 +89,19 @@ app.post("/transfer", (req, res) => {
         return res.json({ error: "Insufficient balance" });
       }
 
-      // update balances
+      // deduct sender
       db.run(
         "UPDATE wallets SET balance = balance - ? WHERE id = ?",
         [amt, from_wallet]
       );
 
+      // add receiver
       db.run(
         "UPDATE wallets SET balance = balance + ? WHERE id = ?",
         [amt, to_wallet]
       );
 
-      // ================= SAVE HISTORY (FIXED) =================
+      // ================= SAVE TRANSACTIONS (FIXED) =================
 
       db.run(
         "INSERT INTO transactions (wallet_id, type, amount, description) VALUES (?, ?, ?, ?)",
@@ -112,7 +118,7 @@ app.post("/transfer", (req, res) => {
   );
 });
 
-// ================= TRANSACTIONS =================
+/* ================= TRANSACTIONS ================= */
 app.get("/transactions/:walletId", (req, res) => {
   db.all(
     "SELECT * FROM transactions WHERE wallet_id = ? ORDER BY created_at DESC",
@@ -122,12 +128,12 @@ app.get("/transactions/:walletId", (req, res) => {
         return res.json({ transactions: [] });
       }
 
-      res.json({ transactions: rows });
+      res.json({ transactions: rows || [] });
     }
   );
 });
 
-// ================= SERVER =================
+/* ================= SERVER ================= */
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
