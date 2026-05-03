@@ -18,7 +18,7 @@ app.use(bodyParser.json());
 /* ================= SIMPLE SESSION STORE ================= */
 const sessions = {};
 
-/* ================= ROOT ================= */
+/* ================= HEALTH CHECK ================= */
 app.get("/", (req, res) => {
   res.json({ status: "Wallet API is running 🚀" });
 });
@@ -59,9 +59,7 @@ app.post("/register", (req, res) => {
     "INSERT INTO users (phone, password) VALUES (?, ?)",
     [phone, password],
     function (err) {
-      if (err) {
-        return res.json({ error: "User already exists" });
-      }
+      if (err) return res.json({ error: "User already exists" });
 
       db.run(
         "INSERT INTO wallets (user_id, balance) VALUES (?, ?)",
